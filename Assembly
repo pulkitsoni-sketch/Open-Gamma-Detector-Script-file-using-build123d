@@ -1,0 +1,83 @@
+"""
+assembly.py — Open Gamma Detector enclosure assembly
+
+Run:
+  Ctrl+Shift+P → "OCP: Start Viewer"  (start viewer FIRST)
+  then: python3 assembly.py
+"""
+
+from build123d import *
+from ocp_vscode import show, set_defaults
+import os
+
+set_defaults(reset_camera=True)
+
+BASE = os.path.dirname(os.path.abspath(__file__))
+
+def load(filename):
+    path = os.path.join(BASE, filename)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"STL not found: {path}")
+    print(f"Loading {filename}...")
+    return import_stl(path)
+
+# ── Load ──────────────────────────────────────────────────────
+lower = load("Case_Lower_rebuilt.stl")
+upper = load("Case_Upper_rebuilt.stl")
+bezel = load("LCD_Bezel_rebuilt.stl")
+cover = load("Panel_Cover_rebuilt.stl")
+
+# ── 1) Case_Lower — centred at XY origin, Z=0..7 ─────────────
+lower_placed = lower.moved(Location((0, 0, 1.5)))
+
+# ── 2) Case_Upper — XY-centred to match Lower, sits at Z=7 ───
+UPPER_DX = -146.3 / 2   # -73.15
+UPPER_DY = -72.8  / 2   # -36.4
+UPPER_DZ =  7.0
+upper_placed = upper.moved(Location((UPPER_DX, UPPER_DY, UPPER_DZ)))
+
+# ── 3) LCD_Bezel — rotate 90° about Z, place on R1 top face ──
+# TC1 cavity centre in Upper local: X=26.08, Y=36.4
+# In assembly: X=-47.07, Y=0, Z=60.67
+BEZEL_X = (7.33 + 37.5 / 2) + UPPER_DX   # -47.07
+BEZEL_Y = (72.8 / 2)        + UPPER_DY   #   0.00
+BEZEL_Z = 7.0 + 53.67                     #  60.67
+bezel_placed = (
+    bezel
+    .moved(Location((0, 0, 0), (0, 0, 90)))        # rotate 90° about Z
+    .moved(Location((BEZEL_X, BEZEL_Y, BEZEL_Z)))  # translate to TC1 cavity
+)
+
+# ── 4) Panel_Cover — rotate then translate to R2 right-face opening ──
+# R2 opening centre in assembly frame:
+#   FC_CX_local=146.3, FC_CY_local=36.4, FC_CZ_local=4.75
+#   In assembly: X=73.15, Y=0.0, Z=11.75
+COVER_X = 5
+COVER_Y = 0.0
+COVER_Z = 44
+cover_placed = (
+    cover
+    .moved(Location((0, 0, 0), (90, 0, 0)))        # rotate 90° about X
+    .moved(Location((0, 0, 0), (0, 0, 90)))        # rotate 90° about Z
+    .moved(Location((0, 0, 0), (0, -90, 0)))       # rotate -90° about Y 
+    .moved(Location((COVER_X, COVER_Y, COVER_Z)))  # translate to R2 opening
+)
+
+# ── Merge into single Compound ────────────────────────────────
+print("Merging into assembly compound...")
+assembly = Compound(children=[
+    lower_placed,
+    upper_placed,
+    bezel_placed,
+    cover_placed,
+])
+
+# ── Export single assembly STL ────────────────────────────────
+out = os.path.join(BASE, "assembly.stl")
+export_stl(assembly, out)
+print(f"✓ Exported → {out}")
+
+# ── Show in OCP viewer ────────────────────────────────────────
+print("Sending to OCP CAD Viewer...")
+show(assembly, names=["Assembly"], colors=["#7db4d8"])
+print("✓ Done — check the OCP CAD Viewer")
