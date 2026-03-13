@@ -1,0 +1,311 @@
+"""
+validate.py — Volumetric & Symmetric-Difference Analysis
+Compares original STL files against rebuilt STL files.
+
+INSTALL (run once):
+    pip install trimesh manifold3d numpy
+
+RUN:
+    /usr/local/bin/python3 "/Users/softage/Desktop/Visual Studio/validate.py"
+"""
+
+import os
+import struct
+import numpy as np
+
+try:
+    import trimesh
+    HAS_TRIMESH = True
+except ImportError:
+    HAS_TRIMESH = False
+
+# ── Colour codes ──────────────────────────────────────────────
+GREEN  = "\033[92m"
+RED    = "\033[91m"
+YELLOW = "\033[93m"
+CYAN   = "\033[96m"
+RESET  = "\033[0m"
+BOLD   = "\033[1m"
+
+# ─────────────────────────────────────────────────────────────
+# RAW STL UTILITIES  (no extra libraries needed)
+# ─────────────────────────────────────────────────────────────
+
+def read_binary_stl(path):
+    triangles = []
+    with open(path, 'rb') as f:
+        f.read(80)
+        n = struct.unpack('<I', f.read(4))[0]
+        for _ in range(n):
+            data = struct.unpack('<12fH', f.read(50))
+            triangles.append({
+                'normal': np.array(data[0:3]),
+                'v1':     np.array(data[3:6]),
+                'v2':     np.array(data[6:9]),
+                'v3':     np.array(data[9:12]),
+            })
+    return triangles
+
+def is_binary_stl(path):
+    with open(path, 'rb') as f:
+        header = f.read(80)
+    return not (header[:5] == b'solid' and header[5:6] in (b' ', b'\n', b'\r'))
+
+def get_all_vertices(path):
+    pts = []
+    if is_binary_stl(path):
+        with open(path, 'rb') as f:
+            f.read(80)
+            n = struct.unpack('<I', f.read(4))[0]
+            for _ in range(n):
+                data = struct.unpack('<12fH', f.read(50))
+                pts.extend([data[3:6], data[6:9], data[9:12]])
+    else:
+        with open(path, 'r', errors='ignore') as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith('vertex'):
+                    p = line.split()
+                    pts.append((float(p[1]), float(p[2]), float(p[3])))
+    return np.array(pts)
+
+def volume_from_stl(path):
+    total = 0.0
+    if is_binary_stl(path):
+        with open(path, 'rb') as f:
+            f.read(80)
+            n = struct.unpack('<I', f.read(4))[0]
+            for _ in range(n):
+                data = struct.unpack('<12fH', f.read(50))
+                v1 = np.array(data[3:6])
+                v2 = np.array(data[6:9])
+                v3 = np.array(data[9:12])
+                total += np.dot(v1, np.cross(v2, v3)) / 6.0
+    else:
+        verts = []
+        with open(path, 'r', errors='ignore') as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith('vertex'):
+                    p = line.split()
+                    verts.append([float(p[1]), float(p[2]), float(p[3])])
+        for i in range(0, len(verts) - 2, 3):
+            v1, v2, v3 = np.array(verts[i]), np.array(verts[i+1]), np.array(verts[i+2])
+            total += np.dot(v1, np.cross(v2, v3)) / 6.0
+    return abs(total)
+
+def triangle_count(path):
+    if is_binary_stl(path):
+        with open(path, 'rb') as f:
+            f.read(80)
+            return struct.unpack('<I', f.read(4))[0]
+    with open(path, 'r', errors='ignore') as f:
+        return sum(1 for l in f if l.strip().startswith('facet normal'))
+
+def bbox(path):
+    pts = get_all_vertices(path)
+    return pts.min(axis=0), pts.max(axis=0)
+
+def surface_area_from_stl(path):
+    total = 0.0
+    if is_binary_stl(path):
+        with open(path, 'rb') as f:
+            f.read(80)
+            n = struct.unpack('<I', f.read(4))[0]
+            for _ in range(n):
+                data = struct.unpack('<12fH', f.read(50))
+                v1 = np.array(data[3:6])
+                v2 = np.array(data[6:9])
+                v3 = np.array(data[9:12])
+                total += np.linalg.norm(np.cross(v2 - v1, v3 - v1)) / 2.0
+    return total
+
+# ─────────────────────────────────────────────────────────────
+# SYMMETRIC DIFFERENCE  (requires trimesh + manifold3d)
+# ─────────────────────────────────────────────────────────────
+
+def symmetric_difference(orig_path, rebuilt_path):
+    if not HAS_TRIMESH:
+        return None, None, None
+    try:
+        a = trimesh.load(orig_path,    force='mesh')
+        b = trimesh.load(rebuilt_path, force='mesh')
+
+        if not a.is_watertight:
+            trimesh.repair.fill_holes(a)
+        if not b.is_watertight:
+            trimesh.repair.fill_holes(b)
+
+        a_minus_b = trimesh.boolean.difference([a, b], engine='manifold')
+        b_minus_a = trimesh.boolean.difference([b, a], engine='manifold')
+
+        vol_amb = abs(a_minus_b.volume) if a_minus_b is not None and len(a_minus_b.faces) > 0 else 0.0
+        vol_bma = abs(b_minus_a.volume) if b_minus_a is not None and len(b_minus_a.faces) > 0 else 0.0
+
+        return vol_amb + vol_bma, abs(a.volume), abs(b.volume)
+    except Exception as e:
+        return None, None, str(e)
+
+# ─────────────────────────────────────────────────────────────
+# HAUSDORFF DISTANCE
+# ─────────────────────────────────────────────────────────────
+
+def hausdorff_distance(path_a, path_b, sample_count=5000):
+    pts_a = get_all_vertices(path_a)
+    pts_b = get_all_vertices(path_b)
+
+    rng = np.random.default_rng(42)
+    if len(pts_a) > sample_count:
+        pts_a = pts_a[rng.choice(len(pts_a), sample_count, replace=False)]
+    if len(pts_b) > sample_count:
+        pts_b = pts_b[rng.choice(len(pts_b), sample_count, replace=False)]
+
+    def directed(src, tgt):
+        max_min = 0.0
+        chunk = 500
+        for i in range(0, len(src), chunk):
+            s = src[i:i+chunk]
+            dists = np.sqrt(((s[:, None] - tgt[None])**2).sum(axis=2))
+            max_min = max(max_min, dists.min(axis=1).max())
+        return max_min
+
+    h_ab = directed(pts_a, pts_b)
+    h_ba = directed(pts_b, pts_a)
+    return max(h_ab, h_ba)
+
+# ─────────────────────────────────────────────────────────────
+# PER-PART REPORT
+# ─────────────────────────────────────────────────────────────
+
+def analyse_pair(label, orig_path, rebuilt_path):
+    print(f"\n{BOLD}{CYAN}{'═'*62}{RESET}")
+    print(f"{BOLD}{CYAN}  {label}{RESET}")
+    print(f"{CYAN}{'═'*62}{RESET}")
+
+    for p, name in [(orig_path, 'ORIGINAL'), (rebuilt_path, 'REBUILT')]:
+        if not os.path.exists(p):
+            print(f"  {RED}✗ FILE NOT FOUND [{name}]: {p}{RESET}")
+            return
+
+    orig_vol    = volume_from_stl(orig_path)
+    rebuilt_vol = volume_from_stl(rebuilt_path)
+    vol_diff    = abs(orig_vol - rebuilt_vol)
+    vol_pct     = vol_diff / orig_vol * 100 if orig_vol > 0 else 0
+
+    orig_tris    = triangle_count(orig_path)
+    rebuilt_tris = triangle_count(rebuilt_path)
+
+    orig_sa    = surface_area_from_stl(orig_path)
+    rebuilt_sa = surface_area_from_stl(rebuilt_path)
+    sa_pct     = abs(orig_sa - rebuilt_sa) / orig_sa * 100 if orig_sa > 0 else 0
+
+    omin, omax = bbox(orig_path)
+    rmin, rmax = bbox(rebuilt_path)
+    odims = omax - omin
+    rdims = rmax - rmin
+
+    print(f"\n  {'Metric':<35} {'ORIGINAL':>12}  {'REBUILT':>12}  {'DIFF':>10}")
+    print(f"  {'─'*72}")
+    print(f"  {'Triangles':<35} {orig_tris:>12,}  {rebuilt_tris:>12,}")
+    print(f"  {'Volume (mm³)':<35} {orig_vol:>12.2f}  {rebuilt_vol:>12.2f}  {vol_diff:>8.2f}")
+    print(f"  {'Volume error':<35} {'':>12}  {'':>12}  {vol_pct:>8.3f}%")
+    print(f"  {'Surface area (mm²)':<35} {orig_sa:>12.2f}  {rebuilt_sa:>12.2f}  {abs(orig_sa-rebuilt_sa):>8.2f}")
+    print(f"  {'Surface area error':<35} {'':>12}  {'':>12}  {sa_pct:>8.3f}%")
+    print(f"  {'BBox X (mm)':<35} {odims[0]:>12.3f}  {rdims[0]:>12.3f}  {abs(odims[0]-rdims[0]):>8.3f}")
+    print(f"  {'BBox Y (mm)':<35} {odims[1]:>12.3f}  {rdims[1]:>12.3f}  {abs(odims[1]-rdims[1]):>8.3f}")
+    print(f"  {'BBox Z (mm)':<35} {odims[2]:>12.3f}  {rdims[2]:>12.3f}  {abs(odims[2]-rdims[2]):>8.3f}")
+
+    print(f"\n  {BOLD}Surface deviation (Hausdorff distance):{RESET}")
+    print(f"  Computing...", end='', flush=True)
+    hd = hausdorff_distance(orig_path, rebuilt_path)
+    hd_rating = (
+        f"{GREEN}EXCELLENT{RESET}" if hd < 0.1  else
+        f"{GREEN}GOOD{RESET}"      if hd < 0.5  else
+        f"{YELLOW}FAIR{RESET}"     if hd < 1.0  else
+        f"{RED}POOR{RESET}"
+    )
+    print(f"\r  {'Max surface deviation (mm)':<35} {hd:>12.4f}  → {hd_rating}")
+
+    print(f"\n  {BOLD}Symmetric difference (volumetric overlap):{RESET}")
+    if HAS_TRIMESH:
+        print(f"  Computing...", end='', flush=True)
+        sym_diff, a_vol, b_vol = symmetric_difference(orig_path, rebuilt_path)
+        if sym_diff is not None:
+            sd_pct = sym_diff / a_vol * 100 if a_vol and a_vol > 0 else 0
+            sd_rating = (
+                f"{GREEN}EXCELLENT{RESET}" if sd_pct < 0.5  else
+                f"{GREEN}GOOD{RESET}"      if sd_pct < 2.0  else
+                f"{YELLOW}FAIR{RESET}"     if sd_pct < 5.0  else
+                f"{RED}POOR{RESET}"
+            )
+            print(f"\r  {'Sym-diff volume (mm³)':<35} {sym_diff:>12.3f}")
+            print(f"  {'As % of original volume':<35} {sd_pct:>11.3f}%")
+            print(f"  {'Rating':<35} {sd_rating}")
+        else:
+            err = b_vol if isinstance(b_vol, str) else "unknown error"
+            print(f"\r  {YELLOW}Boolean operation failed: {err}{RESET}")
+            print(f"  {YELLOW}(falling back to volume-only rating){RESET}")
+            _print_volume_rating(vol_pct)
+    else:
+        print(f"  {YELLOW}trimesh not installed — install with: pip install trimesh manifold3d{RESET}")
+        _print_volume_rating(vol_pct)
+
+    print()
+    _print_verdict(vol_pct, hd, sa_pct)
+
+def _print_volume_rating(vol_pct):
+    r = (
+        f"{GREEN}EXCELLENT{RESET}" if vol_pct < 0.5  else
+        f"{GREEN}GOOD{RESET}"      if vol_pct < 2.0  else
+        f"{YELLOW}FAIR{RESET}"     if vol_pct < 5.0  else
+        f"{RED}POOR{RESET}"
+    )
+    print(f"  {'Volume-only rating':<35} {r}  ({vol_pct:.3f}% diff)")
+
+def _print_verdict(vol_pct, hd, sa_pct):
+    score = sum([
+        vol_pct < 2.0,
+        hd      < 0.5,
+        sa_pct  < 2.0,
+    ])
+    if score == 3:
+        verdict = f"{GREEN}{BOLD}✓ PASS — Good geometric match{RESET}"
+    elif score == 2:
+        verdict = f"{YELLOW}{BOLD}~ MARGINAL — Minor discrepancies{RESET}"
+    else:
+        verdict = f"{RED}{BOLD}✗ FAIL — Significant differences{RESET}"
+    print(f"  {'Overall verdict':<35} {verdict}")
+
+# ─────────────────────────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────────────────────────
+
+if __name__ == '__main__':
+
+    ORIG_DIR    = "/Users/softage/Desktop/Open Gamma Detector"
+    REBUILT_DIR = "/Users/softage/Desktop/Visual Studio"
+
+    PARTS = [
+        ("Case Lower",  "Case_Lower.stl",  "Case_Lower_rebuilt.stl"),
+        ("Case Upper",  "Case_Upper.stl",  "Case_Upper_rebuilt.stl"),
+        ("LCD Bezel",   "LCD_Bezel.stl",   "LCD_Bezel_rebuilt.stl"),
+        ("Panel Cover", "Panel_Cover.stl", "Panel_Cover_rebuilt.stl"),
+    ]
+
+    print(f"\n{BOLD}{'═'*62}{RESET}")
+    print(f"{BOLD}  Open Gamma Detector — STL Validation Report{RESET}")
+    print(f"{'═'*62}{RESET}")
+    print(f"  Originals : {ORIG_DIR}")
+    print(f"  Rebuilt   : {REBUILT_DIR}")
+    print(f"  trimesh   : {'✓ available (full analysis)' if HAS_TRIMESH else '✗ not installed (volume + Hausdorff only)'}")
+
+    for label, orig_name, rebuilt_name in PARTS:
+        analyse_pair(
+            label,
+            os.path.join(ORIG_DIR,    orig_name),
+            os.path.join(REBUILT_DIR, rebuilt_name),
+        )
+
+    print(f"\n{BOLD}{'═'*62}{RESET}")
+    print(f"{BOLD}  Analysis complete.{RESET}")
+    print(f"{'═'*62}\n")
