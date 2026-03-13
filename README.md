@@ -1,0 +1,1 @@
+# Open-Gamma-Detector-Script-file-using-build123d
