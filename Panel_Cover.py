@@ -1,73 +1,64 @@
 """
 Panel_Cover.py — build123d script for Panel_Cover.stl
 
-TRUNCATED PYRAMID (loft)
-  Bottom face : 60mm x 30mm  (at Z=0)
-  Top face    : 48mm x 18mm  (at Z=6)
-  Height      : 6mm
+STL analysis (local coords, origin at bbox min corner):
+  Z=0  : socket inner base  X:5.2..24.8=19.6mm,  Y:5.4..54.6=49.2mm
+  Z=4  : pyramid base       X:0..30=30mm,         Y:0..60=60mm
+  Z=10 : pyramid top        X:6..24=18mm,          Y:6..54=48mm
 
-RECTANGULAR SOCKET on bottom face (protrudes downward from Z=0)
-  Outer wall  : 49.2mm x 19.6mm
-  Inner void  : 47mm   x 17mm   (= cavity opening)
-  Wall thick  : 1.1mm  (length sides)
-  Depth       : 4mm  (walls protrude 4mm below bottom face, Z=0 to Z=-4)
+  ► Long axis (60mm) is in Y — X and Y were SWAPPED in previous script.
 
-CAVITY inside socket
-  Continues upward 4mm into the pyramid body (Z=0 to Z=4)
-  So total internal depth from wall bottom to cavity top = 8mm
-
-All features centred on the part origin.
-
-To view live: Ctrl+Shift+P -> 'OCP: Start Viewer', then run script.
+CORRECTED DIMENSIONS
+  Pyramid bottom : 30mm(X) × 60mm(Y)  at Z=4
+  Pyramid top    : 18mm(X) × 48mm(Y)  at Z=10, height=6mm
+  Socket walls   : outer 19.6mm(X) × 49.2mm(Y), inner 17mm(X) × 47mm(Y)
+                   protrude 4mm downward from Z=4 to Z=0
+  Cavity         : 17mm(X) × 47mm(Y), from Z=4 upward 4mm into pyramid
 """
 
 from build123d import *
 
-# ── Truncated pyramid dimensions ─────────────────────────────
-BOT_L = 60.0    # bottom face length (X)
-BOT_W = 30.0    # bottom face breadth (Y)
-TOP_L = 48.0    # top face length (X)
-TOP_W = 18.0    # top face breadth (Y)
-PYR_H =  6.0    # height of pyramid
+# ── Dimensions (X=30 short side, Y=60 long side) ─────────────
+BOT_L  = 30.0    # pyramid base X  (was 60 — CORRECTED)
+BOT_W  = 60.0    # pyramid base Y  (was 30 — CORRECTED)
+TOP_L  = 18.0    # pyramid top  X  (was 48 — CORRECTED)
+TOP_W  = 48.0    # pyramid top  Y  (was 18 — CORRECTED)
+PYR_H  =  6.0    # pyramid height
 
-# ── Socket / cavity dimensions ────────────────────────────────
-WALL_OUT_L = 49.2   # outer wall length
-WALL_OUT_W = 19.6   # outer wall breadth
-WALL_IN_L  = 47.0   # inner cavity length  (= wall inner = cavity)
-WALL_IN_W  = 17.0   # inner cavity breadth
-WALL_H     =  4.0   # wall protrusion below bottom face
-CAVITY_D   =  4.0   # cavity depth into pyramid body
+WALL_OUT_L = 19.6   # socket outer X  (was 49.2 — CORRECTED)
+WALL_OUT_W = 49.2   # socket outer Y  (was 19.6 — CORRECTED)
+WALL_IN_L  = 17.0   # socket inner X  (was 47 — CORRECTED)
+WALL_IN_W  = 47.0   # socket inner Y  (was 17 — CORRECTED)
+WALL_H     =  4.0   # socket protrusion downward
+CAVITY_D   =  4.0   # cavity depth upward into pyramid
 
 # ── Build ─────────────────────────────────────────────────────
 with BuildPart() as panel_cover:
 
-    # 1) Truncated pyramid via loft
+    # 1) Truncated pyramid via loft (Z=0 to Z=PYR_H)
     with BuildSketch(Plane.XY) as s_bot:
         Rectangle(BOT_L, BOT_W)
     with BuildSketch(Plane.XY.offset(PYR_H)) as s_top:
         Rectangle(TOP_L, TOP_W)
     loft()
 
-    # 2) Rectangular socket walls protruding downward (Z=0 to Z=-WALL_H)
-    #    Built as hollow rectangle extruded downward
+    # 2) Socket walls protruding downward (Z=0 to Z=-WALL_H)
     with BuildSketch(Plane.XY):
-        Rectangle(WALL_OUT_L, WALL_OUT_W)         # outer profile
-        Rectangle(WALL_IN_L, WALL_IN_W, mode=Mode.SUBTRACT)  # hollow inside
-    extrude(amount=-WALL_H)                        # extrude downward
+        Rectangle(WALL_OUT_L, WALL_OUT_W)
+        Rectangle(WALL_IN_L, WALL_IN_W, mode=Mode.SUBTRACT)
+    extrude(amount=-WALL_H)
 
-    # 3) Rectangular cavity cut into pyramid from bottom face (Z=0 to Z=CAVITY_D)
+    # 3) Cavity cut upward into pyramid from Z=0
     with BuildSketch(Plane.XY):
         Rectangle(WALL_IN_L, WALL_IN_W)
-    extrude(amount=CAVITY_D, mode=Mode.SUBTRACT)   # cut upward into pyramid
+    extrude(amount=CAVITY_D, mode=Mode.SUBTRACT)
 
-# ── OCP VS Code live preview ──────────────────────────────────
 try:
     from ocp_vscode import show
     show(panel_cover.part, names=["Panel_Cover"])
 except ImportError:
     pass
 
-# ── Export ────────────────────────────────────────────────────
 export_stl(panel_cover.part, "Panel_Cover_rebuilt.stl")
 print(f"Panel_Cover volume : {panel_cover.part.volume:.2f} mm³")
-print("Exported -> Panel_Cover_rebuilt.stl")
+print("Exported → Panel_Cover_rebuilt.stl")
