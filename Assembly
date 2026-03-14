@@ -57,8 +57,7 @@ COVER_Y = 0.0
 COVER_Z = 44
 cover_placed = (
     cover
-    .moved(Location((0, 0, 0), (90, 0, 0)))        # rotate 90° about X
-    .moved(Location((0, 0, 0), (0, 0, 90)))        # rotate 90° about Z
+    .moved(Location((0, 0, 0), (0, 90, 0)))        # rotate 90° about Z
     .moved(Location((0, 0, 0), (0, -90, 0)))       # rotate -90° about Y 
     .moved(Location((COVER_X, COVER_Y, COVER_Z)))  # translate to R2 opening
 )
