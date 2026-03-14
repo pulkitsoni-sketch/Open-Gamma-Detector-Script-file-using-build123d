@@ -21,5 +21,3 @@ Time taken: 10 hours
   Panel Cover
   Volume error                                                      0.000%
   Sym-diff as % of original              0.000%
-  ──────────────────────────────────────────────────────────────
-  ✓ PASS — All metrics within tolerance  (4/4 metrics pass)
