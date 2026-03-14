@@ -20,7 +20,6 @@ CAVITIES (all verified from STL):
   Cavity A: 34 x 18 x 1mm
               from pyramid top (Z=8.2) downward 1mm to Z=7.2
               centred in X, offset +2mm in Y
-              (4.5mm gap on +Y side, 8.5mm gap on -Y side) ← verified from STL
 
   Cavity B: 35.5 x 23.5 x 1.5mm
               opens 1mm below top (Z=7.2), depth 1.5mm → bottom at Z=5.7
@@ -29,7 +28,6 @@ CAVITIES (all verified from STL):
   Cavities C x2: 14 x 4 x 1.5mm
               same Z as B (Z=7.2 to Z=5.7)
               at Y=+13.75 and Y=-13.75
-              (inner edge of C flush with outer edge of B)
 """
 
 from build123d import *
@@ -47,20 +45,16 @@ PYR_H                       = 4.5
 PYR_Z0 = CUB_H + EXT_H     # 3.7 — pyramid bottom
 PYR_Z1 = PYR_Z0 + PYR_H    # 8.2 — pyramid top (front face)
 
-# 36x34 cavity: starts at CUB_H (Z=3.0), depth 2.7mm → ends at Z=5.7
 BOT_CAV_L, BOT_CAV_B, BOT_CAV_D = 36.0, 34.0, 2.7
 
-# Cavity A: 34x18, from top, offset +2mm in Y (verified: Y=-7..+11, centre=+2)
 TC_A_L, TC_A_B, TC_A_D     = 34.0, 18.0, 1.0
-TC_A_Y                      = +2.0   # ← +2.0 NOT -2.0 (verified from STL)
+TC_A_Y                      = +2.0
 
-# Cavity B: 35.5x23.5, opens 1mm below top, centred
 TC_B_L, TC_B_B, TC_B_D     = 35.5, 23.5, 1.5
 TC_B_Z_OPEN                 = PYR_Z1 - 1.0    # 7.2
 
-# Cavities C x2: 14x4, same Z as B, at Y=±13.75
 TC_C_L, TC_C_B, TC_C_D     = 14.0, 4.0, 1.5
-TC_C_Y                      = TC_B_B / 2 + TC_C_B / 2   # 11.75+2.0=13.75
+TC_C_Y                      = TC_B_B / 2 + TC_C_B / 2   # 13.75
 
 # ── Build ─────────────────────────────────────────────────────
 with BuildPart() as lcd_bezel:
@@ -88,14 +82,11 @@ with BuildPart() as lcd_bezel:
     loft()
 
     # 5) 36x34x2.7mm cavity — starts at Z=CUB_H (=3.0), cuts 2.7mm upward
-    #    Cuts through: base extrusion (0.7mm) + 2.0mm into pyramid = 2.7mm total
-    #    CORRECTED: was incorrectly starting at PYR_Z0 (3.7) before
     with BuildSketch(Plane.XY.offset(CUB_H)):
         Rectangle(BOT_CAV_L, BOT_CAV_B)
     extrude(amount=BOT_CAV_D, mode=Mode.SUBTRACT)
 
     # 6) Cavity A — 34x18x1mm from pyramid top face, offset Y=+2mm
-    #    CORRECTED: Y offset is +2.0 not -2.0 (verified: window at Y=-7..+11)
     with BuildSketch(Plane.XY.offset(PYR_Z1)):
         with Locations((0, TC_A_Y)):
             Rectangle(TC_A_L, TC_A_B)
@@ -112,14 +103,12 @@ with BuildPart() as lcd_bezel:
             Rectangle(TC_C_L, TC_C_B)
     extrude(amount=-TC_C_D, mode=Mode.SUBTRACT)
 
-# ── OCP VS Code live preview ──────────────────────────────────
 try:
     from ocp_vscode import show
     show(lcd_bezel.part, names=["LCD_Bezel"])
 except ImportError:
     pass
 
-# ── Export ────────────────────────────────────────────────────
 export_stl(lcd_bezel.part, "LCD_Bezel_rebuilt.stl")
 print(f"LCD_Bezel volume : {lcd_bezel.part.volume:.2f} mm³")
-print("Exported -> LCD_Bezel_rebuilt.stl")
+print("Exported → LCD_Bezel_rebuilt.stl")
